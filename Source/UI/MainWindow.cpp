@@ -60,7 +60,7 @@ MainContentComponent::~MainContentComponent()
 
 void MainContentComponent::paint (juce::Graphics& g)
 {
-    g.fillAll (AudioCoPilot::DesignSystem::Colours::getColour(AudioCoPilot::DesignSystem::Colours::Surface::Background));
+    g.fillAll (Theme::background);
 }
 
 void MainContentComponent::changeListenerCallback (juce::ChangeBroadcaster* source)

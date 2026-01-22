@@ -48,8 +48,11 @@ public:
     static constexpr int brandHeaderHeight = 80;
     
     // Layout constants - horizontal meters need height for all channels
-    static constexpr int topBarHeight = 50; // Reduced for single-line selectors
+    static constexpr int topBarHeight = 120; // Height for card layout (title + channels label + combo + padding)
     static constexpr int meterAreaHeight = 900; // Initial height, will adjust based on channels
+    
+private:
+    AppLookAndFeel customLF; // Instância do LookAndFeel customizado
 };
 
 class MainWindow : public juce::DocumentWindow,

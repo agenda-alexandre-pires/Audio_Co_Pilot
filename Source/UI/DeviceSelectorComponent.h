@@ -41,4 +41,11 @@ private:
     juce::String currentOutputDeviceName;
     
     bool isUpdating{false};
+    
+    // Áreas dos cards para posicionamento
+    juce::Rectangle<int> inputCardArea;
+    juce::Rectangle<int> outputCardArea;
+    
+    // LookAndFeel customizado
+    AppLookAndFeel customLF;
 };

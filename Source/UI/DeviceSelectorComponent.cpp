@@ -109,15 +109,13 @@ void DeviceSelectorComponent::changeListenerCallback(juce::ChangeBroadcaster* so
 {
     if (source == &LocalizedStrings::getInstance())
     {
-        auto& strings = LocalizedStrings::getInstance();
-        inputDeviceLabel.setText(strings.getInputSelector() + ":", juce::dontSendNotification);
-        outputDeviceLabel.setText(strings.getOutputSelector() + ":", juce::dontSendNotification);
         repaint();
     }
     else if (source == &deviceManager.getAudioDeviceManager())
     {
-        // Device changed, update selection
+        // Device changed, update selection and repaint to refresh channel counts
         updateSelectedDevices();
+        repaint();
     }
 }
 
