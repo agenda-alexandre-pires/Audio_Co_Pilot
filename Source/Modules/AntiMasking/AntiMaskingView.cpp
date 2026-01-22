@@ -8,14 +8,18 @@ AntiMaskingView::AntiMaskingView (AntiMaskingController& c)
 {
     auto& strings = LocalizedStrings::getInstance();
 
+    // Title - visual melhorado (maior, mais destacado)
     title.setColour (juce::Label::textColourId, juce::Colours::white);
     title.setJustificationType (juce::Justification::centredLeft);
+    title.setFont (juce::Font (16.0f, juce::Font::bold));
     addAndMakeVisible (title);
 
     title.setText (strings.getAntiMaskingTitle(), juce::dontSendNotification);
 
+    // Target label - visual melhorado (como no design)
     targetLabel.setText (strings.getAntiMaskingTargetLabel(), juce::dontSendNotification);
-    targetLabel.setColour (juce::Label::textColourId, juce::Colours::white);
+    targetLabel.setColour (juce::Label::textColourId, juce::Colour (0xff3b82f6)); // Azul como no design
+    targetLabel.setFont (juce::Font (12.0f, juce::Font::bold));
     addAndMakeVisible (targetLabel);
 
     targetCombo.addListener (this);

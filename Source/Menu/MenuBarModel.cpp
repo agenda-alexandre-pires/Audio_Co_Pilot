@@ -48,6 +48,8 @@ juce::PopupMenu MenuBarModel::getMenuForIndex(int topLevelMenuIndex, const juce:
         }
         
         case 2: // Device Menu
+            menu.addItem(DeviceSelector, strings.getMenuDeviceSelector());
+            menu.addSeparator();
             populateDeviceMenu(menu);
             break;
             
@@ -107,6 +109,11 @@ void MenuBarModel::menuItemSelected(int menuItemID, int topLevelMenuIndex)
         case AIStageHand:
             if (moduleActivationCallback)
                 moduleActivationCallback(AIStageHand);
+            break;
+        
+        case DeviceSelector:
+            if (moduleActivationCallback)
+                moduleActivationCallback(DeviceSelector);
             break;
         
         default:

@@ -100,7 +100,6 @@ target_sources(AudioCoPilot PRIVATE
     Source/Modules/AntiMasking/AISuggestionsEngine.h
     Source/Modules/AntiMasking/BarkSpectrumDisplay.h
     Source/Modules/AntiMasking/AntiMaskingView.cpp
-    Source/Modules/AntiMasking/AntiMaskingView.cpp
     Source/Modules/AntiMasking/AntiMaskingView.h
 
     # RTA Module

@@ -1,4 +1,5 @@
 #include "RTAView.h"
+#include "../../UI/DesignSystem/DesignSystem.h"
 
 namespace AudioCoPilot
 {
@@ -6,6 +7,8 @@ namespace AudioCoPilot
 RTAView::RTAView(RTAController& c, DeviceManager& dm)
     : controller(c)
 {
+    using namespace DesignSystem;
+    
     // Create Device Selector
     deviceSelector = std::make_unique<DeviceSelectorComponent>(dm);
     addAndMakeVisible(deviceSelector.get());
@@ -13,7 +16,8 @@ RTAView::RTAView(RTAController& c, DeviceManager& dm)
     // Resolution Selector
     resolutionLabel.setText("Resolution:", juce::dontSendNotification);
     resolutionLabel.setJustificationType(juce::Justification::centredRight);
-    resolutionLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    resolutionLabel.setFont(Typography::labelMedium());
+    resolutionLabel.setColour(juce::Label::textColourId, Colours::getColour(Colours::Text::Primary));
     addAndMakeVisible(resolutionLabel);
     
     resolutionSelector.addItem("1/3 Octave", 1);
@@ -72,7 +76,8 @@ void RTAView::visibilityChanged()
 
 void RTAView::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff1e1e1e)); // Background
+    using namespace DesignSystem;
+    g.fillAll(Colours::getColour(Colours::Surface::Background));
     
     // Get levels
     auto leftLevels = controller.getLevels(0);

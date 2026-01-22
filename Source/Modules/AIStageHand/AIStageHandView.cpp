@@ -12,9 +12,11 @@ AIStageHandView::AIStageHandView(AIStageHandController& c)
     alertBox.setMultiLine(true);
     alertBox.setScrollbarsShown(true);
     alertBox.setCaretVisible(false);
-    alertBox.setColour(juce::TextEditor::backgroundColourId, juce::Colours::transparentBlack);
-    alertBox.setColour(juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
-    alertBox.setColour(juce::TextEditor::textColourId, juce::Colours::whitesmoke);
+    using namespace AudioCoPilot::DesignSystem;
+    alertBox.setColour(juce::TextEditor::backgroundColourId, Colours::getColour(Colours::Surface::Panel));
+    alertBox.setColour(juce::TextEditor::outlineColourId, Colours::getColour(Colours::Border::Default));
+    alertBox.setColour(juce::TextEditor::textColourId, Colours::getColour(Colours::Text::Primary));
+    alertBox.setFont(Typography::bodySmall());
     addAndMakeVisible(alertBox);
 
     startTimerHz(20); // 50ms
@@ -27,11 +29,12 @@ AIStageHandView::~AIStageHandView()
 
 void AIStageHandView::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colours::black);
+    using namespace AudioCoPilot::DesignSystem;
+    g.fillAll(Colours::getColour(Colours::Surface::Background));
 
-    const auto textColour = juce::Colours::whitesmoke;
+    const auto textColour = Colours::getColour(Colours::Text::Primary);
     g.setColour(textColour);
-    g.setFont(AudioCoPilot::DesignSystem::Typography::labelLarge());
+    g.setFont(Typography::headlineMedium());
 
     g.drawText("AI Stage Hand - Feedback Watch", getLocalBounds().removeFromTop(headerHeight),
                juce::Justification::centredLeft, false);
@@ -57,7 +60,8 @@ void AIStageHandView::paint(juce::Graphics& g)
         juce::Rectangle<int> meterRect(x, y, meterWidth, meterHeight);
 
         // Fundo
-        g.setColour(juce::Colours::darkgrey.withAlpha(0.5f));
+        using namespace AudioCoPilot::DesignSystem;
+        g.setColour(Colours::getColour(Colours::Surface::MeterBackground));
         g.fillRect(meterRect);
 
         // Alerta pulsando em vermelho
@@ -70,7 +74,7 @@ void AIStageHandView::paint(juce::Graphics& g)
                 alertActive = true;
                 float phase = (float) std::sin(age * 0.02);
                 float alpha = juce::jlimit(0.3f, 0.9f, 0.6f + 0.3f * phase);
-                g.setColour(juce::Colours::red.withAlpha(alpha));
+                g.setColour(Colours::getColour(Colours::Status::Alert).withAlpha(alpha));
                 g.fillRect(meterRect);
             }
         }
@@ -82,8 +86,8 @@ void AIStageHandView::paint(juce::Graphics& g)
 
         auto bar = meterRect.withTrimmedTop((int) (meterRect.getHeight() * (1.0f - norm)));
         const auto meterColour = alertActive
-            ? juce::Colours::yellow
-            : AudioCoPilot::DesignSystem::Colours::getColour(AudioCoPilot::DesignSystem::Colours::Status::Safe);
+            ? Colours::getColour(Colours::Status::Warning)
+            : Colours::getColour(Colours::Status::Safe);
         g.setColour(meterColour);
         g.fillRect(bar);
 

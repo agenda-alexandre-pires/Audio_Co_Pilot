@@ -4,8 +4,9 @@
 PhasePlotComponent::PhasePlotComponent(TFProcessor& proc)
     : processor(proc)
 {
-    // Start timer for real-time updates (60Hz = 16.67ms for smooth Smaart-like display)
-    startTimer(17);
+    // Start timer for real-time updates (30Hz = 33ms for stable Smaart-like display)
+    // Reduced from 60Hz to avoid jitter and improve stability
+    startTimer(33);
 }
 
 PhasePlotComponent::~PhasePlotComponent()
@@ -50,7 +51,7 @@ void PhasePlotComponent::drawPhaseGraph(juce::Graphics& g, juce::Rectangle<int> 
     float height = static_cast<float>(graphArea.getHeight());
     
     // Draw axes
-    g.setColour(juce::Colours::darkgrey);
+    g.setColour(juce::Colour(0xff404040));  // Darker gray for axes
     
     // Horizontal axis (frequency, log scale)
     g.drawLine(padding, graphArea.getBottom(), graphArea.getRight(), graphArea.getBottom(), 1.0f);
@@ -61,7 +62,7 @@ void PhasePlotComponent::drawPhaseGraph(juce::Graphics& g, juce::Rectangle<int> 
     // Frequency labels (Smaart-style: 31.5, 63, 125, 250, 500, 1k, 2k, 4k, 8k, 16k)
     // CRITICAL: Use the SAME frequencyToX function for ticks AND plot
     g.setFont(juce::Font(10.0f));
-    g.setColour(juce::Colours::lightgrey);
+    g.setColour(juce::Colour(0xff505050));  // Softer gray for labels
     const float ticks[] = {31.5f, 63.0f, 125.0f, 250.0f, 500.0f, 1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f};
     const juce::String tickLabels[] = {"31.5", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"};
     
@@ -74,8 +75,10 @@ void PhasePlotComponent::drawPhaseGraph(juce::Graphics& g, juce::Rectangle<int> 
         // Use the SAME frequencyToX function that the plot uses
         float x = frequencyToX(freq, width, minFrequency, maxFrequency);
         
-        // Draw vertical line at this position
+        // Draw vertical line at this position (softer gray, less visible)
+        g.setColour(juce::Colour(0xff353535));  // Very soft gray for grid lines
         g.drawVerticalLine(static_cast<int>(padding + x), graphArea.getY(), graphArea.getBottom());
+        g.setColour(juce::Colour(0xff505050));  // Restore label color
         
         // Draw label at the same position
         g.drawText(tickLabels[i], 
@@ -87,8 +90,11 @@ void PhasePlotComponent::drawPhaseGraph(juce::Graphics& g, juce::Rectangle<int> 
     for (float phase = -180.0f; phase <= 180.0f; phase += 90.0f)
     {
         float y = phaseToY(phase, height);
+        // Draw horizontal grid line (softer gray, less visible)
+        g.setColour(juce::Colour(0xff353535));  // Very soft gray for grid lines
         g.drawHorizontalLine(static_cast<int>(graphArea.getY() + y), 
                             graphArea.getX(), graphArea.getRight());
+        g.setColour(juce::Colour(0xff505050));  // Softer gray for labels
         g.drawText(juce::String(static_cast<int>(phase)) + "°", 
                    5, static_cast<int>(graphArea.getY() + y - 7), 35, 14,
                    juce::Justification::centredRight);
@@ -120,8 +126,8 @@ void PhasePlotComponent::drawPhaseGraph(juce::Graphics& g, juce::Rectangle<int> 
             // Break path segment
             if (segmentStarted)
             {
-                g.setColour(graphColour.withAlpha(0.3f));
-                g.strokePath(currentSegment, juce::PathStrokeType(1.5f));
+                g.setColour(graphColour.withAlpha(0.4f));
+                g.strokePath(currentSegment, juce::PathStrokeType(2.5f));  // Thicker line
                 currentSegment.clear();
                 segmentStarted = false;
             }
@@ -148,8 +154,9 @@ void PhasePlotComponent::drawPhaseGraph(juce::Graphics& g, juce::Rectangle<int> 
         if (i == phaseData.size() - 1 || 
             (i > 0 && std::abs(alpha - juce::jlimit(0.0f, 1.0f, (coherenceData[i-1] - 0.5f) / 0.5f)) > 0.3f))
         {
-            g.setColour(graphColour.withAlpha(0.3f + alpha * 0.7f));  // Range: 0.3 to 1.0
-            g.strokePath(currentSegment, juce::PathStrokeType(1.5f));
+            // Stronger color with thicker line (2.5px instead of 1.5px)
+            g.setColour(graphColour.withAlpha(0.5f + alpha * 0.5f));  // Range: 0.5 to 1.0 (stronger)
+            g.strokePath(currentSegment, juce::PathStrokeType(2.5f));  // Thicker line
             currentSegment.clear();
             segmentStarted = false;
         }
@@ -158,8 +165,8 @@ void PhasePlotComponent::drawPhaseGraph(juce::Graphics& g, juce::Rectangle<int> 
     // Draw final segment if any
     if (segmentStarted)
     {
-        g.setColour(graphColour);
-        g.strokePath(currentSegment, juce::PathStrokeType(1.5f));
+        g.setColour(graphColour);  // Full intensity for final segment
+        g.strokePath(currentSegment, juce::PathStrokeType(2.5f));  // Thicker line
     }
 }
 
@@ -203,7 +210,7 @@ void PhasePlotComponent::visibilityChanged()
     if (isVisible())
     {
         if (!isTimerRunning())
-            startTimer(17);  // 60Hz for smooth real-time display (Smaart-like)
+            startTimer(33);  // ~30Hz (33ms) for stable real-time display
     }
     else
     {

@@ -25,9 +25,15 @@ void TFProcessor::prepare(int newFFTSize, double newSampleRate)
     
     // Update averaging alpha using time constant
     // alpha = exp(-frameDt / Tavg) for exponential averaging
-    // This ensures fast convergence (0.3-1.0s time constant recommended)
+    // Smaart-like time constant (1.5s) for stable display
+    // Use adaptive averaging: fast initially (0.3s), then stable (1.5s)
     double Tavg = averagingTime.load();
     averagingAlpha = std::exp(-frameDt / Tavg);
+    
+    // Log averaging settings for debugging
+    juce::Logger::writeToLog("TFProcessor::prepare - Averaging: Tavg=" + juce::String(Tavg, 3) + 
+                             "s, alpha=" + juce::String(averagingAlpha, 4) + 
+                             ", frameDt=" + juce::String(frameDt * 1000.0, 2) + "ms");
     
     // Prepare FFT analyzers
     // NOTE: FFTAnalyzer rounds fftSize to nearest power of 2
@@ -44,6 +50,13 @@ void TFProcessor::prepare(int newFFTSize, double newSampleRate)
     }
     
     int spectrumSize = fftSize / 2 + 1;
+    
+    // Initialize double-buffered results (after spectrumSize is finalized)
+    magnitudeDbBuffer.resize(spectrumSize, -60.0f);
+    phaseDegreesBuffer.resize(spectrumSize, 0.0f);
+    coherenceBuffer.resize(spectrumSize, 0.0f);
+    
+    frameCount = 0;
     
     // Resize all vectors
     X.resize(spectrumSize);
@@ -81,6 +94,38 @@ void TFProcessor::prepare(int newFFTSize, double newSampleRate)
     // Clear buffers
     referenceBuffer.clear();
     measurementBuffer.clear();
+    
+    // Initialize GCC-PHAT FFT for fast delay detection
+    // Calculate FFT order (must be power of 2)
+    phatFftOrder = static_cast<int>(std::round(std::log2(static_cast<double>(fftSize))));
+    int checkSize = 1 << phatFftOrder;
+    
+    if (checkSize == fftSize)
+    {
+        // Valid power of 2 - create FFT for IFFT
+        phatFFT = std::make_unique<juce::dsp::FFT>(phatFftOrder);
+        phatFftBuffer.assign(fftSize, std::complex<float>(0.0f, 0.0f));
+        phatTime.assign(fftSize, 0.0f);
+        juce::Logger::writeToLog("TFProcessor::prepare - GCC-PHAT FFT initialized: order=" + 
+                                 juce::String(phatFftOrder) + ", size=" + juce::String(fftSize));
+    }
+    else
+    {
+        // Not power of 2 - fallback to phase-based method
+        phatFFT.reset();
+        phatFftBuffer.clear();
+        phatTime.clear();
+        juce::Logger::writeToLog("TFProcessor::prepare - GCC-PHAT disabled (fftSize not power of 2: " + 
+                                 juce::String(fftSize) + ")");
+    }
+    
+    // Reset delay state
+    lastDelaySec = 0.0;
+    stableDelayCount = 0;
+    delayLocked = false;
+    estimatedDelay = 0.0;
+    smoothedDelay = 0.0;
+    delayUpdateCounter = 0;
     
     reset();
     ready.store(true);
@@ -144,49 +189,65 @@ void TFProcessor::processFrame()
 {
     juce::ScopedLock lock(processLock);
     
-    // Step 1: Update averages and compute H = Gxy / (Gxx + eps)
-    // Following exact document formula:
-    // Gxx = avg(X * conj(X))
-    // Gxy = avg(Y * conj(X))
-    // H = Gxy / (Gxx + eps)
-    updateAverages();
+    frameCount++;
     
-    // Step 2: Estimate delay periodically
+    // Step 1: Adaptive averaging - fast initially, stable later
+    // Use fast averaging (0.3s) for first 30 frames, then switch to stable (1.5s)
+    if (frameCount <= fastAveragingFrames)
+    {
+        // Fast averaging for quick initial response (0.3s time constant)
+        double fastAlpha = std::exp(-frameDt / 0.3);
+        double oldAlpha = averagingAlpha;
+        averagingAlpha = fastAlpha;
+        updateAverages();
+        averagingAlpha = oldAlpha;  // Restore for next frame
+    }
+    else
+    {
+        // Normal averaging (1.5s time constant)
+        updateAverages();
+    }
+    
+    // Step 2: Estimate delay using GCC-PHAT (uses instantaneous spectrum)
+    // Update delay more frequently when searching for faster response
     delayUpdateCounter++;
-    if (delayUpdateCounter >= delayUpdatePeriod)
+    int delayPeriod = delayLocked ? 20 : 2;  // Every 2 frames when searching (was 4), every 20 when locked
+    if (delayUpdateCounter >= delayPeriod)
     {
         delayUpdateCounter = 0;
-        estimateDelay();
+        estimateDelay();  // GCC-PHAT with instantaneous X/Y
     }
     
-    // Step 3: Compensate delay in complex domain (as per document)
-    double avgCoherence = 0.0;
-    int spectrumSize = static_cast<int>(gamma2.size());
-    for (int k = 0; k < spectrumSize; ++k)
-    {
-        avgCoherence += gamma2[k];
-    }
-    avgCoherence /= spectrumSize;
-    
-    // Apply delay compensation if coherence is good (removed 10ms limit - too restrictive)
-    if (avgCoherence > 0.6)
+    // Step 3: Apply delay compensation ALWAYS (even without lock) for immediate display
+    // Smaart applies delay compensation immediately, not waiting for lock
+    if (std::abs(estimatedDelay) > 1e-6)
     {
         applyDelayCompensation();
     }
     else
     {
-        H_compensated = H;  // No delay compensation
+        // No delay compensation if delay is negligible
+        H_compensated = H;
     }
     
-    // Step 4: Apply smoothing in complex domain (as per document)
+    // Step 4: Apply smoothing in complex domain (1/12 octave, Smaart-like)
     applySmoothing();
     
-    // Step 5: Unwrap phase (still in complex domain)
+    // Step 5: Unwrap phase (still in complex domain) - Always apply for stable display
     unwrapPhase();
     
     // Step 6: Extract magnitude and phase (ONLY AFTER all processing)
     extractMagnitudeAndPhase();
     
+    // Step 7: Update double-buffered results for smooth UI (atomic swap)
+    {
+        juce::ScopedLock bufferLockGuard(bufferLock);
+        magnitudeDbBuffer = magnitudeDb;
+        phaseDegreesBuffer = phaseDegrees;
+        coherenceBuffer = coherence;
+    }
+    
+    // Signal UI update (stable updates, not every frame)
     newDataAvailable.store(true);
 }
 
@@ -237,16 +298,30 @@ void TFProcessor::updateAverages()
 
 void TFProcessor::estimateDelay()
 {
-    int spectrumSize = static_cast<int>(Gxy.size());
+    // Use GCC-PHAT with INSTANTANEOUS spectrum (X, Y) for fast delay detection
+    // This avoids chicken-and-egg: doesn't depend on averaged coherence
+    // CRITICAL: Use instantaneous data for 2s response (like Smaart)
     
-    // GCC-PHAT: C_phat = Gxy / |Gxy|
+    if (!phatFFT)
+    {
+        // Fallback to phase-based method if GCC-PHAT not available
+        estimateDelayPhaseBased();
+        return;
+    }
+    
+    int spectrumSize = static_cast<int>(X.size());
+    
+    // Step 1: Compute GCC-PHAT from INSTANTANEOUS cross-spectrum
+    // C_phat[k] = (Y[k] * conj(X[k])) / |Y[k] * conj(X[k])|
     std::vector<std::complex<double>> C_phat(spectrumSize);
     for (int k = 0; k < spectrumSize; ++k)
     {
-        double mag = std::abs(Gxy[k]);
+        // Instantaneous cross-spectrum: Y * conj(X)
+        std::complex<double> C_k = Y[k] * std::conj(X[k]);
+        double mag = std::abs(C_k);
         if (mag > eps)
         {
-            C_phat[k] = Gxy[k] / mag;
+            C_phat[k] = C_k / mag;  // PHAT: normalize to unit magnitude
         }
         else
         {
@@ -254,9 +329,123 @@ void TFProcessor::estimateDelay()
         }
     }
     
-    // IFFT to get cross-correlation
-    // For simplicity, use JUCE FFT (need to create IFFT)
-    // For now, use phase-based delay estimation (more stable)
+    // Step 2: Build full spectrum (0..N-1) from half spectrum (0..N/2)
+    // For k=0..N/2: use C_phat[k]
+    // For k=N/2+1..N-1: use conj(C_phat[N-k]) (Hermitian symmetry)
+    int N = fftSize;
+    int N_half = spectrumSize - 1;  // Last index of half spectrum
+    
+    // Fill phatFftBuffer with complex values
+    for (int k = 0; k < N; ++k)
+    {
+        std::complex<double> val;
+        if (k <= N_half)
+        {
+            val = C_phat[k];
+        }
+        else
+        {
+            // Hermitian symmetry: C[N-k] = conj(C[k])
+            int k_mirror = N - k;
+            if (k_mirror <= N_half)
+            {
+                val = std::conj(C_phat[k_mirror]);
+            }
+            else
+            {
+                val = std::complex<double>(0.0, 0.0);
+            }
+        }
+        
+        phatFftBuffer[k] = std::complex<float>(static_cast<float>(val.real()), 
+                                                static_cast<float>(val.imag()));
+    }
+    
+    // Step 3: IFFT to get cross-correlation in time domain
+    // JUCE FFT::perform expects Complex<float>* and performs in-place
+    phatFFT->perform(phatFftBuffer.data(), phatFftBuffer.data(), true);  // inverse=true
+    
+    // Step 4: Extract correlation and normalize
+    // IFFT result is in phatFftBuffer, extract real part (imaginary should be ~0 for real input)
+    for (int n = 0; n < N; ++n)
+    {
+        phatTime[n] = phatFftBuffer[n].real() / static_cast<float>(N);
+    }
+    
+    // Step 5: Find peak (maximum absolute value)
+    int peakIndex = 0;
+    float peakValue = std::abs(phatTime[0]);
+    for (int n = 1; n < N; ++n)
+    {
+        float absVal = std::abs(phatTime[n]);
+        if (absVal > peakValue)
+        {
+            peakValue = absVal;
+            peakIndex = n;
+        }
+    }
+    
+    // Step 6: Convert index to signed lag (circular)
+    int lag = peakIndex;
+    if (lag > N / 2)
+        lag -= N;
+    
+    // Step 7: Convert lag to delay in seconds
+    double delaySec = static_cast<double>(lag) / sampleRate;
+    
+    // Step 8: Smoothing and locking logic - optimized for faster response
+    if (!delayLocked)
+    {
+        // Moderate smoothing for stable convergence (50% new value)
+        const double a = 0.50;
+        estimatedDelay = a * estimatedDelay + (1.0 - a) * delaySec;
+        
+        // Check stability (converged if change < 0.1ms - more lenient for faster lock)
+        if (std::abs(estimatedDelay - lastDelaySec) < delayStabilityThreshold)
+        {
+            stableDelayCount++;
+        }
+        else
+        {
+            stableDelayCount = 0;
+        }
+        
+        lastDelaySec = estimatedDelay;
+        
+        // Lock after 3 stable updates (was 5) for faster response
+        if (stableDelayCount >= delayStabilityCount)
+        {
+            delayLocked = true;
+            juce::Logger::writeToLog("TFProcessor::estimateDelay - Delay locked at " + 
+                                     juce::String(estimatedDelay * 1000.0, 2) + " ms " +
+                                     "(after " + juce::String(frameCount) + " frames)");
+        }
+    }
+    else
+    {
+        // Light smoothing when locked (10% new value per update)
+        const double a2 = 0.90;
+        estimatedDelay = a2 * estimatedDelay + (1.0 - a2) * delaySec;
+    }
+    
+    // Step 9: Safety clamp (±50ms)
+    estimatedDelay = juce::jlimit(-0.05, 0.05, estimatedDelay);
+    
+    // Log delay (every 50 updates to avoid spam)
+    static int logCounter = 0;
+    logCounter++;
+    if (logCounter % 50 == 0)
+    {
+        juce::Logger::writeToLog("TFProcessor::estimateDelay - " + 
+                                 juce::String(estimatedDelay * 1000.0, 2) + " ms " +
+                                 (delayLocked ? "(locked)" : "(searching)"));
+    }
+}
+
+void TFProcessor::estimateDelayPhaseBased()
+{
+    // Fallback method: phase-based delay estimation (used when GCC-PHAT not available)
+    int spectrumSize = static_cast<int>(H.size());
     
     // Linear fit of phase (with unwrap first)
     // Select bins with good coherence
@@ -320,7 +509,7 @@ void TFProcessor::estimateDelay()
         // Clamp to reasonable range
         tau_new = std::max(-0.1, std::min(0.1, tau_new));
         
-        // Smooth delay estimate (faster update for responsiveness)
+        // Smooth delay estimate
         smoothedDelay = 0.8 * smoothedDelay + 0.2 * tau_new;
         estimatedDelay = smoothedDelay;
     }
@@ -365,7 +554,8 @@ void TFProcessor::applySmoothing()
     int spectrumSize = static_cast<int>(H_compensated.size());
     double oct = smoothingOctaves.load();
     
-    // Apply fractional-octave smoothing (1/12 octave default)
+    // Apply fractional-octave smoothing (1/12 octave default, Smaart-like)
+    // Always apply smoothing for stable display (like Smaart)
     if (oct < 1.0/96.0)
     {
         // Skip smoothing only if oct is extremely small
@@ -551,20 +741,23 @@ void TFProcessor::extractMagnitudeAndPhase()
 
 void TFProcessor::getMagnitudeResponse(std::vector<float>& magnitudeDbOut)
 {
-    juce::ScopedLock lock(processLock);
-    magnitudeDbOut = magnitudeDb;
+    // Use double-buffered data for smooth UI updates
+    juce::ScopedLock lock(bufferLock);
+    magnitudeDbOut = magnitudeDbBuffer;
 }
 
 void TFProcessor::getPhaseResponse(std::vector<float>& phaseDegreesOut)
 {
-    juce::ScopedLock lock(processLock);
-    phaseDegreesOut = phaseDegrees;
+    // Use double-buffered data for smooth UI updates
+    juce::ScopedLock lock(bufferLock);
+    phaseDegreesOut = phaseDegreesBuffer;
 }
 
 void TFProcessor::getCoherence(std::vector<float>& coherenceOut)
 {
-    juce::ScopedLock lock(processLock);
-    coherenceOut = coherence;
+    // Use double-buffered data for smooth UI updates
+    juce::ScopedLock lock(bufferLock);
+    coherenceOut = coherenceBuffer;
 }
 
 void TFProcessor::getFrequencyBins(std::vector<float>& frequenciesOut)
@@ -592,9 +785,18 @@ void TFProcessor::reset()
     estimatedDelay = 0.0;
     smoothedDelay = 0.0;
     delayUpdateCounter = 0;
+    frameCount = 0;
     
     referenceBuffer.clear();
     measurementBuffer.clear();
+    
+    // Reset double-buffered results
+    {
+        juce::ScopedLock lock(bufferLock);
+        std::fill(magnitudeDbBuffer.begin(), magnitudeDbBuffer.end(), -60.0f);
+        std::fill(phaseDegreesBuffer.begin(), phaseDegreesBuffer.end(), 0.0f);
+        std::fill(coherenceBuffer.begin(), coherenceBuffer.end(), 0.0f);
+    }
     
     newDataAvailable.store(false);
 }

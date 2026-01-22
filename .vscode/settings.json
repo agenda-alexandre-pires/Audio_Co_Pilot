@@ -1,0 +1,35 @@
+{
+  // Configurações do workspace para Cursor/VS Code
+  // NOTA: A API key do Claude não pode ser configurada aqui
+  // Ela deve ser configurada em: Settings → Models → API Keys no Cursor
+  
+  // Configurações recomendadas para melhor experiência com Cursor
+  "files.exclude": {
+    "**/.git": true,
+    "**/node_modules": true,
+    "**/build": true,
+    "**/DerivedData": true
+  },
+  
+  // Configurações de editor
+  "editor.formatOnSave": true,
+  "editor.tabSize": 4,
+  "editor.insertSpaces": true,
+  
+  // Configurações de C++ (para o projeto JUCE)
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/JUCE/modules/**",
+    "${workspaceFolder}/Source/**"
+  ],
+  
+  // Desabilitar override de OpenAI Base URL (pode quebrar requisições Anthropic)
+  // Esta configuração deve estar DESATIVADA nas configurações do Cursor
+  // "cursor.general.overrideOpenAIBaseURL": false
+  
+  // Configurações de arquivos
+  "files.associations": {
+    "*.h": "cpp",
+    "*.cpp": "cpp",
+    "*.mm": "objective-cpp"
+  }
+}

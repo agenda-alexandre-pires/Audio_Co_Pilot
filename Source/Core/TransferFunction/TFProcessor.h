@@ -63,7 +63,8 @@ private:
     void processFrame();
     void computeCrossSpectrum();
     void updateAverages();
-    void estimateDelay();
+    void estimateDelay();  // GCC-PHAT (fast, uses instantaneous spectrum)
+    void estimateDelayPhaseBased();  // Fallback method
     void applyDelayCompensation();
     void applySmoothing();
     void unwrapPhase();
@@ -87,32 +88,51 @@ private:
     std::vector<std::complex<double>> Gxy;  // Cross-spectrum
     
     // Transfer function
-    std::vector<std::complex<double>> H;  // H1 = Gxy / Gxx
-    std::vector<std::complex<double>> H_compensated;  // With delay compensation
-    std::vector<std::complex<double>> H_smoothed;  // After smoothing
+    std::vector<std::complex<double>> H;  // H1 = Gxy / Gxx (averaged)
+    std::vector<std::complex<double>> H_compensated;  // With delay compensation (averaged)
+    std::vector<std::complex<double>> H_smoothed;  // After smoothing (averaged)
     
     // Coherence
     std::vector<double> gamma2;  // Magnitude-squared coherence
     
-    // Results for UI
+    // Results for UI (double-buffered for stability)
     std::vector<float> magnitudeDb;
     std::vector<float> phaseDegrees;
     std::vector<float> coherence;
     std::vector<float> frequencies;
     
+    // Double-buffered results for smooth UI updates
+    std::vector<float> magnitudeDbBuffer;
+    std::vector<float> phaseDegreesBuffer;
+    std::vector<float> coherenceBuffer;
+    juce::CriticalSection bufferLock;
+    
     // Averaging state (exponential averaging with time constant)
     double averagingAlpha{0.0};  // Computed from averagingTime: alpha = exp(-frameDt / Tavg)
-    std::atomic<double> averagingTime{0.7};  // seconds - time constant (0.3-1.0s for fast convergence)
+    std::atomic<double> averagingTime{1.5};  // seconds - time constant (1.5s for stable Smaart-like response)
     double frameDt{0.0};  // Hop time in seconds
+    int frameCount{0};  // Track frame count for adaptive averaging
+    static constexpr int fastAveragingFrames = 30;  // Use fast averaging for first 30 frames (~0.5s @ 60fps)
     
     // Delay compensation
     double estimatedDelay{0.0};  // in seconds
     double smoothedDelay{0.0};  // smoothed version
     int delayUpdateCounter{0};
     static constexpr int delayUpdatePeriod = 100;  // frames
+    static constexpr double delayStabilityThreshold = 0.0001;  // 0.1ms threshold (was 0.05ms)
+    static constexpr int delayStabilityCount = 3;  // 3 stable updates (was 5)
+    
+    // GCC-PHAT delay finder (fast, uses instantaneous spectrum)
+    std::unique_ptr<juce::dsp::FFT> phatFFT;
+    int phatFftOrder{0};
+    std::vector<std::complex<float>> phatFftBuffer;  // complex spectrum, size fftSize
+    std::vector<float> phatTime;                      // size fftSize
+    double lastDelaySec{0.0};
+    int stableDelayCount{0};
+    bool delayLocked{false};
     
     // Smoothing - 1/12 octave default (Smaart-like)
-    std::atomic<double> smoothingOctaves{1.0/12.0};  // 1/12 octave default
+    std::atomic<double> smoothingOctaves{1.0/12.0};  // 1/12 octave default (Smaart-like)
     
     // Processing parameters
     int fftSize{16384};
